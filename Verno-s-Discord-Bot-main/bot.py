@@ -61,6 +61,8 @@ HEISTS = ["Casino", "Pacific", "Doomsday", "Cayo Perico"]
 MAX_QUEUE_SIZE = 3
 QUEUE_HEADER = "📌 QUEUE STATUS"
 QUEUE_MARKER = "(Managed by bot - do not manually edit formatting)"
+# Hard-coded channel ID where queue status messages are posted
+QUEUE_LOG_CHANNEL_ID = 1483535857171566754
 
 logging.basicConfig(
     level=logging.INFO,
@@ -232,12 +234,17 @@ class HeistBot(commands.Bot):
             await self.recover_queue_state_for_guild(guild)
 
     async def _select_default_status_channel(self, guild: discord.Guild) -> discord.TextChannel:
-        for channel in guild.text_channels:
+        # Always use the hard-coded queue log channel ID
+        channel = guild.get_channel(QUEUE_LOG_CHANNEL_ID)
+        if isinstance(channel, discord.TextChannel):
             perms = channel.permissions_for(guild.me) if guild.me else None
             if perms and perms.send_messages and perms.read_message_history:
                 return channel
-
-        raise RuntimeError("No writable text channel found for queue status message.")
+        
+        raise RuntimeError(
+            f"Queue log channel {QUEUE_LOG_CHANNEL_ID} not found or bot lacks permissions. "
+            "Please verify the channel ID is correct and the bot has send_message and read_message_history permissions."
+        )
 
     async def ensure_queue_status_message(
         self,
@@ -637,7 +644,8 @@ async def setup_heist_panel(
         embed = await bot.build_status_embed(interaction.guild.id)
         panel_msg = await channel.send(embed=embed, view=HeistQueueView())
         bot.embed_panel_messages[interaction.guild.id] = (channel.id, panel_msg.id)
-        await bot.update_queue_status_message(interaction.guild, preferred_channel=channel)
+        # Update queue status message (prefer configured logs channel, not the panel channel)
+        await bot.update_queue_status_message(interaction.guild)
         await interaction.followup.send(
             f"✅ Heist queue panel posted in {channel.mention}. Queue status updates in real-time.",
             ephemeral=True,
