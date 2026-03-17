@@ -63,6 +63,8 @@ QUEUE_HEADER = "📌 QUEUE STATUS"
 QUEUE_MARKER = "(Managed by bot - do not manually edit formatting)"
 # Hard-coded channel ID where queue status messages are posted
 QUEUE_LOG_CHANNEL_ID = 1483535857171566754
+# Hard-coded channel ID where the heist panel should be posted
+HEIST_PANEL_CHANNEL_ID = 1483518478110687407
 
 logging.basicConfig(
     level=logging.INFO,
@@ -618,16 +620,26 @@ async def on_app_command_error(
 
 @bot.tree.command(
     name="setup_heist_panel",
-    description="Post the heist dropdown queue panel in a specific channel.",
+    description="Post the heist dropdown queue panel. If no channel specified, uses the current channel.",
 )
 @bot.owner_only()
-@app_commands.describe(channel="Channel where the dropdown queue panel will be posted")
+@app_commands.describe(channel="(Optional) Channel where the dropdown queue panel will be posted. If omitted, uses current channel.")
 async def setup_heist_panel(
     interaction: discord.Interaction,
-    channel: discord.TextChannel,
+    channel: Optional[discord.TextChannel] = None,
 ) -> None:
     if interaction.guild is None:
         await interaction.response.send_message("This command can only run in a server.", ephemeral=True)
+        return
+
+    # Use specified channel, or current channel if not specified
+    target_channel = channel or interaction.channel
+    
+    if not isinstance(target_channel, discord.TextChannel):
+        await interaction.response.send_message(
+            "The target channel must be a text channel.",
+            ephemeral=True,
+        )
         return
 
     # Prevent concurrent setup attempts
@@ -642,12 +654,12 @@ async def setup_heist_panel(
 
     try:
         embed = await bot.build_status_embed(interaction.guild.id)
-        panel_msg = await channel.send(embed=embed, view=HeistQueueView())
-        bot.embed_panel_messages[interaction.guild.id] = (channel.id, panel_msg.id)
+        panel_msg = await target_channel.send(embed=embed, view=HeistQueueView())
+        bot.embed_panel_messages[interaction.guild.id] = (target_channel.id, panel_msg.id)
         # Update queue status message (prefer configured logs channel, not the panel channel)
         await bot.update_queue_status_message(interaction.guild)
         await interaction.followup.send(
-            f"✅ Heist queue panel posted in {channel.mention}. Queue status updates in real-time.",
+            f"✅ Heist queue panel posted in {target_channel.mention}. Queue status updates in real-time.",
             ephemeral=True,
         )
     except discord.HTTPException as exc:
