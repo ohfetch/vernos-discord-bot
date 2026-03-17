@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -166,6 +167,21 @@ class HeistBot(commands.Bot):
         self,
         guild: discord.Guild,
     ) -> Optional[discord.Message]:
+        # Optimization: Check cached channel first before iterating all channels
+        cached_channel_id = self.queue_status_channel_ids.get(guild.id)
+        if cached_channel_id:
+            channel = guild.get_channel(cached_channel_id)
+            if isinstance(channel, discord.TextChannel):
+                try:
+                    pins = await channel.pins()
+                    for message in pins:
+                        if message.author.id == self.user.id and message.content.startswith(QUEUE_HEADER):
+                            self.queue_status_message_ids[guild.id] = message.id
+                            return message
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
+        
+        # Fallback: search all channels if not in cache
         for channel in guild.text_channels:
             perms = channel.permissions_for(guild.me) if guild.me else None
             if not perms or not perms.read_message_history:
@@ -391,8 +407,11 @@ class HeistBot(commands.Bot):
             return False, "You are already queued for this heist."
 
         entries.append(QueueEntry(user_id=user.id, rockstar_name=rockstar_name))
-        await self.update_queue_status_message(guild)
-        await self.update_embed_panel(guild)
+        # Run both updates concurrently for better performance
+        await asyncio.gather(
+            self.update_queue_status_message(guild),
+            self.update_embed_panel(guild),
+        )
         logger.info("Queued user %s (%s) for %s", user.id, rockstar_name, heist_name)
 
         if len(entries) < MAX_QUEUE_SIZE:
@@ -408,8 +427,11 @@ class HeistBot(commands.Bot):
                 queued_docs=ready_players,
             )
             queue_map[heist_name] = entries[MAX_QUEUE_SIZE:]
-            await self.update_queue_status_message(guild)
-            await self.update_embed_panel(guild)
+            # Run both updates concurrently for better performance
+            await asyncio.gather(
+                self.update_queue_status_message(guild),
+                self.update_embed_panel(guild),
+            )
             logger.info("Consumed 3 queued users for %s and created thread.", heist_name)
             return True, (
                 f"Queued for **{heist_name}** as **{rockstar_name}**. "
@@ -712,7 +734,11 @@ async def clear_heist_queue(
         cleared_label = f"**{heist_name.value}** queue"
 
     try:
-        await bot.update_queue_status_message(interaction.guild)
+        # Run both updates concurrently for better performance, including embed panel update
+        await asyncio.gather(
+            bot.update_queue_status_message(interaction.guild),
+            bot.update_embed_panel(interaction.guild),
+        )
         logger.info(
             "Owner %s cleared queue %s (%s entries)",
             interaction.user.id,
